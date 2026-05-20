@@ -1,0 +1,100 @@
+{
+  "name": "04 - Team Notification (New Lead)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-inbound",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook - WhatsApp Inbound",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\nconst msg = body?.data?.message;\nconst key = body?.data?.key;\nif (!msg || key?.fromMe) return [];\nconst phone = (key?.remoteJid || '').replace('@s.whatsapp.net', '');\nconst text = msg?.conversation || msg?.extendedTextMessage?.text || '';\nconst pushName = body?.data?.pushName || 'Unknown';\nif (!phone || !text) return [];\nreturn [{ json: { phone, text, pushName } }];"
+      },
+      "id": "parse",
+      "name": "Parse Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "documentId": { "__rl": true, "value": "={{$env.GOOGLE_SHEET_ID}}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Contacts", "mode": "name" },
+        "filtersUI": {
+          "values": [{ "lookupColumn": "Phone", "lookupValue": "={{$json.phone}}" }]
+        }
+      },
+      "id": "lookup-contact",
+      "name": "Lookup Contact",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [{ "leftValue": "={{$json.Phone}}", "rightValue": "", "operator": { "type": "string", "operation": "isEmpty" } }]
+        }
+      },
+      "id": "is-new",
+      "name": "Is New Lead?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const phone = $('Parse Message').item.json.phone;\nconst name = $('Parse Message').item.json.pushName;\nconst text = $('Parse Message').item.json.text;\nconst now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });\n\nconst message = `*[NEW LEAD]*\\n\\n*Name:* ${name}\\n*Phone:* +${phone}\\n*Message:* ${text}\\n*Time:* ${now}\\n\\nReply directly on WhatsApp or update status in the CRM sheet.`;\n\nreturn [{ json: { message, phone, name } }];"
+      },
+      "id": "build-notification",
+      "name": "Build Notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.EVOLUTION_API_URL}}/message/sendText/={{$env.EVOLUTION_INSTANCE}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{$env.EVOLUTION_API_KEY}}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "number", "value": "={{$env.NOTIFY_PHONE}}" },
+            { "name": "text", "value": "={{$json.message}}" }
+          ]
+        }
+      },
+      "id": "notify-team",
+      "name": "Notify Team",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1340, 200]
+    }
+  ],
+  "connections": {
+    "Webhook - WhatsApp Inbound": { "main": [[{ "node": "Parse Message", "type": "main", "index": 0 }]] },
+    "Parse Message": { "main": [[{ "node": "Lookup Contact", "type": "main", "index": 0 }]] },
+    "Lookup Contact": { "main": [[{ "node": "Is New Lead?", "type": "main", "index": 0 }]] },
+    "Is New Lead?": { "main": [[{ "node": "Build Notification", "type": "main", "index": 0 }], []] },
+    "Build Notification": { "main": [[{ "node": "Notify Team", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "description": "Detects first-time contacts (new leads) and immediately notifies the responsible team member via WhatsApp with the lead's name, phone, and first message."
+  }
+}

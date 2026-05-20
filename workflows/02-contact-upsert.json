@@ -1,0 +1,115 @@
+{
+  "name": "02 - Contact Upsert (New or Returning)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-inbound",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook - WhatsApp Inbound",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\nconst msg = body?.data?.message;\nconst key = body?.data?.key;\nif (!msg || key?.fromMe) return [];\nconst phone = (key?.remoteJid || '').replace('@s.whatsapp.net', '');\nconst text = msg?.conversation || msg?.extendedTextMessage?.text || '';\nconst pushName = body?.data?.pushName || '';\nconst timestamp = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });\nif (!phone || !text) return [];\nreturn [{ json: { phone, text, pushName, timestamp } }];"
+      },
+      "id": "parse",
+      "name": "Parse Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "documentId": { "__rl": true, "value": "={{$env.GOOGLE_SHEET_ID}}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Contacts", "mode": "name" },
+        "filtersUI": {
+          "values": [{ "lookupColumn": "Phone", "lookupValue": "={{$json.phone}}" }]
+        }
+      },
+      "id": "lookup-contact",
+      "name": "Lookup Contact",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false },
+          "conditions": [{ "leftValue": "={{$json.Phone}}", "rightValue": "", "operator": { "type": "string", "operation": "isEmpty" } }]
+        }
+      },
+      "id": "is-new-contact",
+      "name": "Is New Contact?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "value": "={{$env.GOOGLE_SHEET_ID}}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Contacts", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Phone": "={{$('Parse Message').item.json.phone}}",
+            "Name": "={{$('Parse Message').item.json.pushName}}",
+            "Status": "NEW",
+            "Source": "WhatsApp Inbound",
+            "First Contact": "={{$('Parse Message').item.json.timestamp}}",
+            "Last Message": "={{$('Parse Message').item.json.timestamp}}",
+            "Notes": ""
+          }
+        }
+      },
+      "id": "create-contact",
+      "name": "Create New Contact",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": { "__rl": true, "value": "={{$env.GOOGLE_SHEET_ID}}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Contacts", "mode": "name" },
+        "filtersUI": {
+          "values": [{ "lookupColumn": "Phone", "lookupValue": "={{$('Parse Message').item.json.phone}}" }]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Last Message": "={{$('Parse Message').item.json.timestamp}}"
+          }
+        }
+      },
+      "id": "update-contact",
+      "name": "Update Last Message",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1120, 420]
+    }
+  ],
+  "connections": {
+    "Webhook - WhatsApp Inbound": { "main": [[{ "node": "Parse Message", "type": "main", "index": 0 }]] },
+    "Parse Message": { "main": [[{ "node": "Lookup Contact", "type": "main", "index": 0 }]] },
+    "Lookup Contact": { "main": [[{ "node": "Is New Contact?", "type": "main", "index": 0 }]] },
+    "Is New Contact?": {
+      "main": [
+        [{ "node": "Create New Contact", "type": "main", "index": 0 }],
+        [{ "node": "Update Last Message", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "description": "Checks if the incoming WhatsApp contact already exists in the CRM (Google Sheets). Creates a new record for first-time contacts; updates the 'Last Message' timestamp for returning ones."
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "name": "01 - Inbound Message Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-inbound",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook - WhatsApp Inbound",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\nconst msg = body?.data?.message;\nconst key = body?.data?.key;\n\nif (!msg || key?.fromMe) return [];\n\nconst phone = (key?.remoteJid || '').replace('@s.whatsapp.net', '').replace('@g.us', '');\nconst text = msg?.conversation || msg?.extendedTextMessage?.text || '';\nconst pushName = body?.data?.pushName || '';\nconst timestamp = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });\n\nif (!phone || !text) return [];\n\nreturn [{ json: { phone, text, pushName, timestamp, raw: body } }];"
+      },
+      "id": "parse-message",
+      "name": "Parse Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = $input.first().json.text.toLowerCase();\n\nconst intents = [\n  { intent: 'QUOTE_REQUEST', keywords: ['price', 'quote', 'cost', 'budget', 'how much', 'preco', 'orcamento', 'valor', 'quanto'] },\n  { intent: 'SUPPORT', keywords: ['problem', 'broken', 'not working', 'help', 'issue', 'erro', 'problema', 'nao funciona', 'ajuda'] },\n  { intent: 'SCHEDULING', keywords: ['schedule', 'appointment', 'visit', 'when', 'agendar', 'visita', 'horario', 'disponivel'] },\n  { intent: 'GENERAL_INFO', keywords: ['info', 'details', 'what do you', 'services', 'informacao', 'servicos', 'o que voce'] }\n];\n\nlet detected = 'UNKNOWN';\nfor (const { intent, keywords } of intents) {\n  if (keywords.some(k => text.includes(k))) {\n    detected = intent;\n    break;\n  }\n}\n\nreturn [{ json: { ...$input.first().json, intent: detected } }];"
+      },
+      "id": "classify-intent",
+      "name": "Classify Intent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "value": "={{$env.GOOGLE_SHEET_ID}}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Messages", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{$json.timestamp}}",
+            "Phone": "={{$json.phone}}",
+            "Name": "={{$json.pushName}}",
+            "Message": "={{$json.text}}",
+            "Intent": "={{$json.intent}}",
+            "Replied": "PENDING"
+          }
+        }
+      },
+      "id": "log-message",
+      "name": "Log Message to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"status\": \"received\" }"
+      },
+      "id": "respond",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [900, 480]
+    }
+  ],
+  "connections": {
+    "Webhook - WhatsApp Inbound": { "main": [[{ "node": "Parse Message", "type": "main", "index": 0 }]] },
+    "Parse Message": { "main": [[{ "node": "Classify Intent", "type": "main", "index": 0 }]] },
+    "Classify Intent": {
+      "main": [[
+        { "node": "Log Message to Sheets", "type": "main", "index": 0 },
+        { "node": "Respond OK", "type": "main", "index": 0 }
+      ]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "description": "Receives all incoming WhatsApp messages via Evolution API webhook. Parses the message, classifies intent (QUOTE_REQUEST, SUPPORT, SCHEDULING, GENERAL_INFO, UNKNOWN), and logs to Google Sheets."
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "name": "03 - Auto Reply by Intent",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-inbound",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook - WhatsApp Inbound",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\nconst msg = body?.data?.message;\nconst key = body?.data?.key;\nif (!msg || key?.fromMe) return [];\nconst phone = (key?.remoteJid || '').replace('@s.whatsapp.net', '');\nconst text = (msg?.conversation || msg?.extendedTextMessage?.text || '').toLowerCase();\nconst pushName = body?.data?.pushName || 'there';\nif (!phone || !text) return [];\n\nconst intents = [\n  { intent: 'QUOTE_REQUEST', keywords: ['price', 'quote', 'cost', 'budget', 'how much', 'preco', 'orcamento', 'valor', 'quanto'] },\n  { intent: 'SUPPORT', keywords: ['problem', 'broken', 'not working', 'help', 'issue', 'erro', 'problema', 'nao funciona', 'ajuda'] },\n  { intent: 'SCHEDULING', keywords: ['schedule', 'appointment', 'visit', 'when', 'agendar', 'visita', 'horario', 'disponivel'] },\n  { intent: 'GENERAL_INFO', keywords: ['info', 'details', 'what do you', 'services', 'informacao', 'servicos'] }\n];\n\nlet intent = 'UNKNOWN';\nfor (const { intent: i, keywords } of intents) {\n  if (keywords.some(k => text.includes(k))) { intent = i; break; }\n}\n\nconst replies = {\n  QUOTE_REQUEST: `Hi ${pushName}! 👋\\n\\nThank you for reaching out. To prepare a quote, I need a few details:\\n\\n• What service are you looking for?\\n• Location / address\\n• Any specific requirements?\\n\\nI'll get back to you with pricing within a few hours.`,\n  SUPPORT: `Hi ${pushName},\\n\\nSorry to hear you're having an issue. Our support team has been notified and will contact you shortly.\\n\\nIn the meantime, please describe your problem in detail and we'll resolve it as quickly as possible.`,\n  SCHEDULING: `Hi ${pushName}! 📅\\n\\nWe'd be happy to schedule a visit. Please let us know:\\n\\n• Preferred date\\n• Preferred time (morning / afternoon)\\n• Address\\n\\nWe'll confirm availability and get back to you.`,\n  GENERAL_INFO: `Hi ${pushName}! 👋\\n\\nHere's a quick overview of our services:\\n\\n• Security monitoring & alarm systems\\n• CCTV installation & support\\n• Patrol & guard services\\n• Facilities management\\n\\nFeel free to ask about any specific service!`,\n  UNKNOWN: `Hi ${pushName}! 👋\\n\\nThank you for reaching out. One of our team members will get back to you shortly.\\n\\nIf you need immediate assistance, please let us know!`\n};\n\nreturn [{ json: { phone, intent, reply: replies[intent], pushName } }];"
+      },
+      "id": "build-reply",
+      "name": "Build Auto Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.EVOLUTION_API_URL}}/message/sendText/={{$env.EVOLUTION_INSTANCE}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{$env.EVOLUTION_API_KEY}}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "number", "value": "={{$json.phone}}" },
+            { "name": "text", "value": "={{$json.reply}}" }
+          ]
+        }
+      },
+      "id": "send-reply",
+      "name": "Send Auto Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"status\": \"replied\", \"intent\": \"={{$('Build Auto Reply').item.json.intent}}\" }"
+      },
+      "id": "respond",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [900, 300]
+    }
+  ],
+  "connections": {
+    "Webhook - WhatsApp Inbound": { "main": [[{ "node": "Build Auto Reply", "type": "main", "index": 0 }]] },
+    "Build Auto Reply": { "main": [[{ "node": "Send Auto Reply", "type": "main", "index": 0 }]] },
+    "Send Auto Reply": { "main": [[{ "node": "Respond OK", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "description": "Detects the intent of each incoming WhatsApp message and sends a contextual auto-reply via Evolution API. Supports 5 intents: QUOTE_REQUEST, SUPPORT, SCHEDULING, GENERAL_INFO, UNKNOWN."
+  }
+}
