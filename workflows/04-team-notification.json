@@ -63,7 +63,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{$env.EVOLUTION_API_URL}}/message/sendText/={{$env.EVOLUTION_INSTANCE}}",
+        "url": "={{$env.EVOLUTION_API_URL}}/message/sendText/{{$env.EVOLUTION_INSTANCE}}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
